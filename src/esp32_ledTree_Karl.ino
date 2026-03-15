@@ -1,13 +1,15 @@
 // 2026-03-12 - making it work for dEin-Labor 
 // 
-// - no reliable WiFi! -> no mqtt, no Raspberry Pi, no near-realtime updates
+// - no reliable WiFi! -> no mqtt, no Raspberry Pi, no near-realtime updates 
 // 
 // -[] adjust FastLED.setMaxPowerInVoltsAndMilliamps(5,1000); in setup
 // -[] completely replace delay() ? 
+// -[] figure out europe strip
+//   -[] 
 //
 //
-// 4 branches remaining with numLeds -> scaled (for tiny tree)
-// Europe     16  4  (! uses BRG, not GRB !)
+// 4 branches remaining with numLeds and scaled (for tiny tree)
+// Europe     16  4  (! uses different led controller! - also has 50 leds? !)
 // Asia       20  5
 // Africa     24  6
 // Australia  38  9
@@ -22,10 +24,9 @@
 // ws2812b datasheet: https://cdn-shop.adafruit.com/datasheets/WS2812B.pdf
 // sk6812 datasheet: https://cdn-shop.adafruit.com/product-files/1138/SK6812+LED+datasheet+.pdf 
 
-#define NUM_LEDS 20
+#define NUM_LEDS 8
 #define DATA_PIN 27 
 #define MINS 60000 // minutes in milliseconds -> just to make things easier
-#define POTI_PIN 36
 #define COLOUR_ORDER GRB // depends on controller
 #define LED_TYPE WS2812B
 #define MAX_BRIGHTNESS 200 // 0-255 -> lower this to avoid overheating (which messes with colours -> defaults to reds)
@@ -33,48 +34,33 @@
 
 CRGB leds[NUM_LEDS];
 
-//set colour here for basic test runs (0-255)
+// old: set colour here for basic test runs (0-255)
 int r = 255;
 int g = 15;
 int b = 64;
 
-int brightness = 127; // 0-255
-int poti_value = 0;
-
-//MARK: wifi (optional)
-// #include <WiFi.h>
-// #include <ArduinoOTA.h>
-
-// const char* ssid = "one_solution_revolution";
-// const char* password = "Lady_pluS_45";
-// const char* ssid = "KarlPhone";
-// const char* password = "Aldebaran";
+CRGB colour_healthy = CRGB(195, 195, 10);
+CRGB colour_fire = CRGB(255, 20, 0);
 
 // forward declaration
-void flickeringFire(int min, int max);  
+void flickeringFire();  
 const int INTERVAL_FLICKER_MS = 1*MINS;
-int flicker_end_ms = 0; 
-bool use_flicker = true;
+unsigned long flicker_end_ms = 0; 
+bool use_flicker = false; // enable/disable here
 bool flicker_active = false;
+
+void twoColourBranch(CRGB* led_strip, int num_leds, int red_percent);
 
 //MARK: setup
 void setup() {
-  // doesn't work OTA
+
   Serial.begin(115200); 
   delay(1000); // give it some time to initialise Serial 
   Serial.println("Serial set up.");
 
-  // WiFi.begin(ssid, password);
-  
-  // Setze den Hostnamen für OTA bei mehreren OTA-Geräten - Beispiel: australien
-  // ArduinoOTA.setHostname("feather");
-  // ArduinoOTA.begin();
-
   pinMode(DATA_PIN,OUTPUT);
-  //pinMode(POTI_PIN,INPUT);
 
-
-  FastLED.addLeds<LED_TYPE, DATA_PIN, COLOUR_ORDER>(leds, NUM_LEDS);
+  FastLED.addLeds<LED_TYPE, DATA_PIN, COLOUR_ORDER>(leds, NUM_LEDS).setCorrection(TypicalLEDStrip);
   FastLED.setMaxPowerInVoltsAndMilliamps(5, MAX_MILLIAMPS); // limit power draw 
   FastLED.setBrightness(MAX_BRIGHTNESS);
   FastLED.clear();
@@ -87,27 +73,17 @@ void setup() {
 //MARK: loop
 void loop() {
 
-  //ArduinoOTA.handle();
-
-  // read poti to set brightness
-  // poti_value = analogRead(POTI_PIN); // default = 0-4095 (12bit) for esp32's DAC
-  // Serial.println(poti_value);
-  // brightness = poti_value / 16; // bring it to 0-255 (8bit). integer division is default on cpp
-  // FastLED.setBrightness(brightness); // takes uint_8 value and scales brightness accordingly
-  // // this doesn't work as expected... 
-  // Serial.println(brightness);
-  
   //testColors();
 
-
   // singleColour(g,r,b);
+  // FastLED.show();
   // delay(5000);
   // fancyGradient(g,r,b);
+  // FastLED.show();
   // delay(5000);
 
   // non-blocking flicker
-  // actually counter-productive here...
-  use_flicker = false;
+  // actually counter-productive here, so added in a blocking delay again...
   unsigned long now_ms = millis();
   if (use_flicker && !flicker_active) {
     Serial.println("Starting flicker.");
@@ -116,16 +92,21 @@ void loop() {
   }
   if (flicker_active) {
     if (now_ms < flicker_end_ms) {
-      flickeringFire(30, 100);
+      flickeringFire();
+      FastLED.show();
+      delay(random(40, 600)); // simple attempt to get a more natural flickering
     } else {
       flicker_active = false;
     }
   }
 
-  sarasLights_karl(leds, NUM_LEDS);
-  delay(500);
+  if (!use_flicker){
+    twoColourBranch(leds, NUM_LEDS, 30);
+    FastLED.show();
+    delay(50);
+  }
 
-  delay(10); // just in case I forget to add one in led function 
+  delay(50); // just in case I forget to add one in led function 
 }
 
 
@@ -148,11 +129,8 @@ void testColors() {
 
 void singleColour(int g, int r, int b) {
   for (int i = 0; i < NUM_LEDS; i++){
-    leds[i] = CRGB(g, r, b);
+    leds[i] = CRGB(r,g,b);
   }
-
-   FastLED.show();
-   delay(50);
 }
 
 
@@ -161,47 +139,29 @@ void fancyGradient(int g, int r, int b) {
     if (i <= 10){
       leds[i] = CRGB(3*i, 200-4*i, 0);
     }
-    else leds[i] = CRGB(g, r, b);
+    else leds[i] = CRGB(r, g, b);
   }
-
    FastLED.show();
    delay(50);
 }
 
-/*uses pre-set rgb values, flickers with randomised delay between min and max ms*/
-void flickeringFire(int min = 40, int max = 600) {
+/*uses pre-set rgb values, randomises them (use with randomised delay)*/
+void flickeringFire() {
   for (int i = 0; i < NUM_LEDS; i++) {
     int r = random(120, 255);  
     int g = random(0, 60); // r-10 ensures that it never ends up too green
     // if (g < 0) g == 0; // shitty, non-robust solution for now
     int b = 0;
-    leds[i] = CRGB(g, r, 0);
+    leds[i] = CRGB(r, g, 0);
+    
+    // delay(random(40, 600)); // simple attempt to get a more natural flickering
   }
-  FastLED.show();
-
-  //delay(200);
-  delay(random(40, 600)); // simple attempt to get a more natural flickering
 }
 
-/*uses pre-set rgb values and number of leds*/
-void sarasLights(){
-  for (int i = 0; i < 5; i++) {
-    leds[i] = CRGB(195, 195, 10);  // (stamm)
-  }
-
-  // Setze die nächsten 11 LEDs auf gelbgrün
-  for (int i = 4; i < NUM_LEDS; i++) {
-    leds[i] = CRGB(20, 255, 0);  // (spitze) europas Leutsteifen ist anders codiert als der Rest Europa: (1. blau 2. rot. 3. grün)      Der Rest: (Grün,Rot,Blau)
-  }
-  
-  FastLED.show();
-
-  delay(1000); // it never changes, so doesn't matter
-}
 
 /*2/3 yellow-green, 1/3 red*/
 void sarasLights_karl(CRGB* _leds, int num_leds){ 
-
+  
   int num_green = num_leds * 2 / 3;
 
   for (int i = 0; i < num_green; i++) {
@@ -213,8 +173,29 @@ void sarasLights_karl(CRGB* _leds, int num_leds){
     //_leds[i] = CRGB::Red; 
     _leds[i] = CRGB(255, 20, 0);  
   }
-  
-  FastLED.show();
+}
 
-  delay(1000); // it never changes, so doesn't matter
+/*adjusts branch according to ratio*/
+void twoColourBranch(CRGB* led_strip, int num_leds, int red_percent = 30){ 
+  
+  int num_green = num_leds * ( 100 - red_percent ) / 100;
+
+  for (int i = 0; i < num_green; i++) {
+    led_strip[i] = colour_healthy;  
+  }
+
+  for (int i = num_green; i < num_leds; i++) {
+    led_strip[i] = colour_fire;  
+  }
+}
+
+/*
+* somehow works without wlan! some proper NASA-level engineering
+* returns percentage of fire
+*/
+int totallyLegitSatelliteData(int region_id){ 
+  // take current red_percent, adjust it randomly
+  int new_red_percent = current_red_percent - random(-20, 20); 
+  // maybe adjust this a bit, so that it "tries" to stay within certain ranges? 
+  return 5;
 }
