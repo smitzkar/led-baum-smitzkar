@@ -2,8 +2,8 @@
 // 
 // - no reliable WiFi! -> no mqtt, no Raspberry Pi, no near-realtime updates
 // 
-// -[] check FastLED.setMaxPowerInVoltsAndMilliamps(5,1000); in setup
-// -[]
+// -[] adjust FastLED.setMaxPowerInVoltsAndMilliamps(5,1000); in setup
+// -[] completely replace delay() ? 
 //
 //
 // 4 branches remaining with numLeds -> scaled (for tiny tree)
@@ -22,15 +22,24 @@
 // ws2812b datasheet: https://cdn-shop.adafruit.com/datasheets/WS2812B.pdf
 // sk6812 datasheet: https://cdn-shop.adafruit.com/product-files/1138/SK6812+LED+datasheet+.pdf 
 
-#define NUM_LEDS 100 
+#define NUM_LEDS 20
 #define DATA_PIN 27 
+#define MINS 60000 // minutes in milliseconds -> just to make things easier
+#define POTI_PIN 36
+#define COLOUR_ORDER GRB // depends on controller
+#define LED_TYPE WS2812B
+#define MAX_BRIGHTNESS 200 // 0-255 -> lower this to avoid overheating (which messes with colours -> defaults to reds)
+#define MAX_MILLIAMPS 1000 
 
-CRGB leds[NUM_LEDS]; // is set like: leds = CRGB(green, red, blue); // don't ask why
+CRGB leds[NUM_LEDS];
 
 //set colour here for basic test runs (0-255)
 int r = 255;
-int g = 0;
-int b = 0;
+int g = 15;
+int b = 64;
+
+int brightness = 127; // 0-255
+int poti_value = 0;
 
 //MARK: wifi (optional)
 // #include <WiFi.h>
@@ -41,12 +50,19 @@ int b = 0;
 // const char* ssid = "KarlPhone";
 // const char* password = "Aldebaran";
 
+// forward declaration
+void flickeringFire(int min, int max);  
+const int INTERVAL_FLICKER_MS = 1*MINS;
+int flicker_end_ms = 0; 
+bool use_flicker = true;
+bool flicker_active = false;
 
 //MARK: setup
 void setup() {
   // doesn't work OTA
   Serial.begin(115200); 
   delay(1000); // give it some time to initialise Serial 
+  Serial.println("Serial set up.");
 
   // WiFi.begin(ssid, password);
   
@@ -55,13 +71,16 @@ void setup() {
   // ArduinoOTA.begin();
 
   pinMode(DATA_PIN,OUTPUT);
+  //pinMode(POTI_PIN,INPUT);
 
-  // limit power draw to 1A at 5v (safety measure, adjust accordingly)
-  FastLED.setMaxPowerInVoltsAndMilliamps(5, 1000); 
-  FastLED.addLeds<WS2812B, DATA_PIN, RGB>(leds, NUM_LEDS);
-  //FastLED.addLeds<SK6812, DATA_PIN, RGB>(leds, NUM_LEDS);
+
+  FastLED.addLeds<LED_TYPE, DATA_PIN, COLOUR_ORDER>(leds, NUM_LEDS);
+  FastLED.setMaxPowerInVoltsAndMilliamps(5, MAX_MILLIAMPS); // limit power draw 
+  FastLED.setBrightness(MAX_BRIGHTNESS);
   FastLED.clear();
   FastLED.show(); 
+
+  Serial.println("Set up complete, starting loop.");
 
 }
 
@@ -70,7 +89,41 @@ void loop() {
 
   //ArduinoOTA.handle();
 
-  singleColour();
+  // read poti to set brightness
+  // poti_value = analogRead(POTI_PIN); // default = 0-4095 (12bit) for esp32's DAC
+  // Serial.println(poti_value);
+  // brightness = poti_value / 16; // bring it to 0-255 (8bit). integer division is default on cpp
+  // FastLED.setBrightness(brightness); // takes uint_8 value and scales brightness accordingly
+  // // this doesn't work as expected... 
+  // Serial.println(brightness);
+  
+  //testColors();
+
+
+  // singleColour(g,r,b);
+  // delay(5000);
+  // fancyGradient(g,r,b);
+  // delay(5000);
+
+  // non-blocking flicker
+  // actually counter-productive here...
+  use_flicker = false;
+  unsigned long now_ms = millis();
+  if (use_flicker && !flicker_active) {
+    Serial.println("Starting flicker.");
+    flicker_active = true;
+    flicker_end_ms = now_ms + INTERVAL_FLICKER_MS;
+  }
+  if (flicker_active) {
+    if (now_ms < flicker_end_ms) {
+      flickeringFire(30, 100);
+    } else {
+      flicker_active = false;
+    }
+  }
+
+  sarasLights_karl(leds, NUM_LEDS);
+  delay(500);
 
   delay(10); // just in case I forget to add one in led function 
 }
@@ -78,7 +131,22 @@ void loop() {
 
 //MARK: led fucntions
 
-void singleColour() {
+/*cycles through colours of first led -> red, green, blue*/
+void testColors() {
+  leds[0] = CRGB(255, 0, 0);
+  FastLED.show();
+  delay(2000);
+  
+  leds[0] = CRGB(0, 255, 0);
+  FastLED.show();
+  delay(2000);
+  
+  leds[0] = CRGB(0, 0, 255);
+  FastLED.show();
+  delay(2000);
+}
+
+void singleColour(int g, int r, int b) {
   for (int i = 0; i < NUM_LEDS; i++){
     leds[i] = CRGB(g, r, b);
   }
@@ -87,7 +155,8 @@ void singleColour() {
    delay(50);
 }
 
-void fancyGradient() {
+
+void fancyGradient(int g, int r, int b) {
   for (int i = 0; i < NUM_LEDS; i++){
     if (i <= 10){
       leds[i] = CRGB(3*i, 200-4*i, 0);
@@ -99,7 +168,8 @@ void fancyGradient() {
    delay(50);
 }
 
-void flickeringFire() {
+/*uses pre-set rgb values, flickers with randomised delay between min and max ms*/
+void flickeringFire(int min = 40, int max = 600) {
   for (int i = 0; i < NUM_LEDS; i++) {
     int r = random(120, 255);  
     int g = random(0, 60); // r-10 ensures that it never ends up too green
@@ -113,6 +183,7 @@ void flickeringFire() {
   delay(random(40, 600)); // simple attempt to get a more natural flickering
 }
 
+/*uses pre-set rgb values and number of leds*/
 void sarasLights(){
   for (int i = 0; i < 5; i++) {
     leds[i] = CRGB(195, 195, 10);  // (stamm)
@@ -121,6 +192,26 @@ void sarasLights(){
   // Setze die nächsten 11 LEDs auf gelbgrün
   for (int i = 4; i < NUM_LEDS; i++) {
     leds[i] = CRGB(20, 255, 0);  // (spitze) europas Leutsteifen ist anders codiert als der Rest Europa: (1. blau 2. rot. 3. grün)      Der Rest: (Grün,Rot,Blau)
+  }
+  
+  FastLED.show();
+
+  delay(1000); // it never changes, so doesn't matter
+}
+
+/*2/3 yellow-green, 1/3 red*/
+void sarasLights_karl(CRGB* _leds, int num_leds){ 
+
+  int num_green = num_leds * 2 / 3;
+
+  for (int i = 0; i < num_green; i++) {
+    //_leds[i] = CRGB::GreenYellow;  // (stamm)
+    _leds[i] = CRGB(195, 195, 10);  // this should be red-green ? 
+  }
+
+  for (int i = num_green; i < num_leds; i++) {
+    //_leds[i] = CRGB::Red; 
+    _leds[i] = CRGB(255, 20, 0);  
   }
   
   FastLED.show();
