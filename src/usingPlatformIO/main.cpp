@@ -45,29 +45,58 @@
 #define MAX_BRIGHTNESS 200  // 0-255, best to keep this somwhat below max (keeps controllers from overheating)
 #define MINS 60000 // little helper
 
-// custom data type for led strips
-struct StripConfig {
+// pin definitions (only way to NOT have to hardcode them inside setup)
+#define EURO_PIN   27
+#define ASIA_PIN   26
+#define AFRI_PIN   25
+#define AUST_PIN   33
+// colour order definitions (same deal)
+#define EURO_ORDER BRG
+#define ASIA_ORDER GRB
+#define AFRI_ORDER GRB
+#define AUST_ORDER GRB
+// number of leds
+#define EURO_NUM   16
+#define ASIA_NUM   20
+#define AFRI_NUM   24
+#define AUST_NUM   38
+
+// custom led strip object / data type
+struct Strip {
   const char* name;   // 
   int num_leds;       // number of leds in strip
-  int pin;            // data pin
   int milliamps;      // max mA as secondary safety measure
-  EOrder color_order; // depends on led-controller
   CRGB* leds;         // points to the actual LED array
-  int red_percent;    // for the basic fires display
+  int red_percent;    // state for basic fire effects
+  // a bit advanced: 
+  // creates pointer to a function
+  // function has to be of form: `void <functionName>(Strip& <stripName>);`
+  void (*displayMode)(Strip&); 
+  unsigned long last_effect_update; // state for timing
+  int effect_delay;  // state for timing
+  unsigned long satellite_interval_ms; 
 };
 
 // arrays of CRGB elements (red, green, blue), each 0-255
-CRGB leds_europe[16];
-CRGB leds_asia[20];
-CRGB leds_africa[24];
-CRGB leds_australia[38];
+CRGB leds_europe[EURO_NUM];
+CRGB leds_asia[ASIA_NUM];
+CRGB leds_africa[AFRI_NUM];
+CRGB leds_australia[AUST_NUM];
 
-// instantiate strips
-StripConfig strips[] = {
-  {"Europe",    16, 27, 800,  BRG, leds_europe,    15}, // note the different colour order
-  {"Asia",      20, 26, 1000, GRB, leds_asia,      30},
-  {"Africa",    24, 25, 1200, GRB, leds_africa,    40},
-  {"Australia", 38, 33, 1500, GRB, leds_australia, 23}
+// forward declarations (all valid displayMode functions -> can be assigned to strip)
+void sarasLights(Strip& strip);
+void regionFiresStatic(Strip& strip);
+void regionFiresDynamic(Strip& strip);
+void flickeringFire(Strip& strip);
+void fancyGradient(Strip& strip);
+void allLEDsOff(Strip& strip);  
+
+// instantiate strips in array for easy iterating over later
+Strip strips[] = {
+  {"Europe",    EURO_NUM,  800, leds_europe,    15, regionFiresDynamic, 0, 0,  5000}, 
+  {"Asia",      ASIA_NUM, 1000, leds_asia,      30, regionFiresDynamic, 0, 0, 10000},
+  {"Africa",    AFRI_NUM, 1200, leds_africa,    40, regionFiresStatic,  0, 0, 10000},
+  {"Australia", AUST_NUM,  500, leds_australia, 23, sarasLights,        0, 0, 10000},
 };
 // auto-calculate number of strips 
 // very easy to add or remove strips, then forget to manually change this
@@ -79,12 +108,6 @@ const int NUM_STRIPS = sizeof(strips) / sizeof(strips[0]);
 CRGB colour_healthy = CRGB(195, 195, 10);
 CRGB colour_fire = CRGB(255, 20, 0);
 
-// optional: flicker variables
-const int INTERVAL_FLICKER_MS = 1*MINS;
-unsigned long flicker_end_ms = 0; 
-bool use_flicker = false;
-bool flicker_active = false;
-
 //MARK: setup
 void setup() {
   Serial.begin(115200); 
@@ -92,81 +115,60 @@ void setup() {
 
   Serial.println("=== Multi-Strip LED Controller ===");
 
-  // initialize all strips from config
-  for (int i = 0; i < NUM_STRIPS; i++) {
-    // set pin mode
-    pinMode(strips[i].pin, OUTPUT);
-    
-    // handle different color orders
-    switch(strips[i].color_order) {
-      case BRG:
-        FastLED.addLeds<WS2812B, strips[i].pin, BRG>(strips[i].leds, strips[i].num_leds)
-              .setCorrection(TypicalLEDStrip); // optional, but helps fix some odd colour mismatches
-        break;
-      case GRB:
-        FastLED.addLeds<WS2812B, strips[i].pin, GRB>(strips[i].leds, strips[i].num_leds)
-              .setCorrection(TypicalLEDStrip);
-        break;
-      case RGB:
-        FastLED.addLeds<WS2812B, strips[i].pin, RGB>(strips[i].leds, strips[i].num_leds)
-              .setCorrection(TypicalLEDStrip);
-        break;
-        // add default for error handling?
-    }
-    
-    // set max power for strip
-    FastLED.setMaxPowerInVoltsAndMilliamps(5, strips[i].milliamps);
-    
-    Serial.print(strips[i].name);
-    Serial.print(" strip initialized (");
-    Serial.print(strips[i].num_leds);
-    Serial.println(" LEDs)");
-  }
-
+  // init FastLED for each strip explicitly 
+  // MUST be done by hand, hardcoding in pin and colour order
+  
+  pinMode(EURO_PIN, OUTPUT);
+  FastLED.addLeds<WS2812B, EURO_PIN, EURO_ORDER>(strips[0].leds, strips[0].num_leds)
+        .setCorrection(TypicalLEDStrip);
+  FastLED.setMaxPowerInVoltsAndMilliamps(5, strips[0].milliamps);
+  
+  pinMode(ASIA_PIN, OUTPUT);
+  FastLED.addLeds<WS2812B, ASIA_PIN, ASIA_ORDER>(strips[1].leds, strips[1].num_leds)
+        .setCorrection(TypicalLEDStrip);
+  FastLED.setMaxPowerInVoltsAndMilliamps(5, strips[1].milliamps);
+  
+  pinMode(AFRI_PIN, OUTPUT);
+  FastLED.addLeds<WS2812B, AFRI_PIN, AFRI_ORDER>(strips[2].leds, strips[2].num_leds)
+        .setCorrection(TypicalLEDStrip);
+  FastLED.setMaxPowerInVoltsAndMilliamps(5, strips[2].milliamps);
+  
+  pinMode(AUST_PIN, OUTPUT);
+  FastLED.addLeds<WS2812B, AUST_PIN, AUST_ORDER>(strips[3].leds, strips[3].num_leds)
+        .setCorrection(TypicalLEDStrip);
+  FastLED.setMaxPowerInVoltsAndMilliamps(5, strips[3].milliamps);
+  
   // set brightness scaling for all strips, clear all leds
   FastLED.setBrightness(MAX_BRIGHTNESS);
   FastLED.clear();
   FastLED.show(); 
 
   // all done! 
-  Serial.println("Setup complete, starting loop.");
   printStripStatus();
+  Serial.println("Setup complete, starting loop.");
 }
 
 
 
 //MARK: loop
 void loop() {
+  // using static to avoid having to use global variable 
+  // -> basically turns it into a variable that persists between function calls (or iterations in this case)
+  // (really just to keep this all in one place)
+  static unsigned long last_update = 0;
+  const int UPDATE_INTERVAL_MS = 50;  // 20 FPS
   unsigned long now_ms = millis();
 
-  // optional: flicker mode
-  if (use_flicker && !flicker_active) {
-    Serial.println("Starting flicker mode.");
-    flicker_active = true;
-    flicker_end_ms = now_ms + INTERVAL_FLICKER_MS;
-  }
-
-  if (flicker_active) {
-    if (now_ms < flicker_end_ms) {
-      // flicker fire all strips
-      for (int i = 0; i < NUM_STRIPS; i++) {
-        flickeringFire(strips[i].leds, strips[i].num_leds);
-        FastLED.show();
-        delay(random(40, 600)); // simple attempt to get a more natural flickering
-      }
-    } else {
-      flicker_active = false;
-      Serial.println("Flicker mode ended.");
-    }
-  } else {
-    // fallback mode: apply Sara's lights pattern to all strips
+  if (now_ms - last_update >= UPDATE_INTERVAL_MS) {
+    last_update = now_ms;
+    
+    // update and render strips according to their selected display mode
     for (int i = 0; i < NUM_STRIPS; i++) {
-      sarasLights_karl(strips[i].leds, strips[i].num_leds);
+      strips[i].displayMode(strips[i]);
     }
+    
+    FastLED.show(); // update all strips at once
   }
-
-  FastLED.show();  // update all strips at once
-  delay(500); 
 }
 
 //MARK: LED functions
@@ -198,73 +200,104 @@ void testColors() {
   FastLED.show();
 }
 
-/* single colour for whole strip */
-void singleColour(CRGB* _leds, int num_leds, int r, int g, int b) {
-  for (int i = 0; i < num_leds; i++){
-    _leds[i] = CRGB(r, g, b);
+/* turn strip off */
+void allLEDsOff(Strip& strip) {
+  for (int i = 0; i < strip.num_leds; i++) {
+    strip.leds[i] = CRGB(0, 0, 0);
   }
 }
 
-/* basic gradient effect */
-void fancyGradient(CRGB* _leds, int num_leds) {
-  for (int i = 0; i < num_leds; i++){
-    if (i <= num_leds / 2){
-      _leds[i] = CRGB(3*i, 200-4*i, 0);
-    }
-    else {
-      _leds[i] = CRGB(255, 64, 0);
+/* single colour for whole strip */
+void singleColour(Strip& strip, CRGB color) {
+  for (int i = 0; i < strip.num_leds; i++) {
+    strip.leds[i] = color;
+  }
+}
+
+/* basic gradient effect example */
+void fancyGradient(Strip& strip) {
+  for (int i = 0; i < strip.num_leds; i++) {
+    if (i <= strip.num_leds / 2) {
+      strip.leds[i] = CRGB(3*i, 200-4*i, 0);
+    } else {
+      strip.leds[i] = CRGB(255, 64, 0);
     }
   }
 }
 
 /* flickering fire effect */
-void flickeringFire(CRGB* _leds, int num_leds) {
-  for (int i = 0; i < num_leds; i++) {
-    int r = random(120, 255);  
-    int g = random(0, 60);
-    int b = 0;
-    _leds[i] = CRGB(r, g, b);
+void flickeringFire(Strip& strip) {
+  unsigned long now = millis();
+  
+  // random delay between updates for natural-ish flicker
+  static int next_delay = random(40, 600);
+  
+  if (strip.effect_delay == 0) {  // first call
+    strip.effect_delay = random(40, 600);
+  }
+    
+  if (now - strip.last_effect_update >= strip.effect_delay) {
+    strip.last_effect_update = now;
+    strip.effect_delay = random(40, 600);
+    
+    for (int i = 0; i < strip.num_leds; i++) {
+      int r = random(120, 255);
+      int g = random(0, 60);
+      strip.leds[i] = CRGB(r, g, 0);
+    }
   }
 }
 
 /* 2/3 yellow-green, 1/3 red - Sara's original pattern */
-void sarasLights_karl(CRGB* _leds, int num_leds){ 
-  int num_green = num_leds * 2 / 3;
+void sarasLights(Strip& strip){ 
+  int num_green = strip.num_leds * 2 / 3;
 
   // bottom 2/3: yellow-green (trunk)
   for (int i = 0; i < num_green; i++) {
-    _leds[i] = CRGB(195, 195, 10);
+    strip.leds[i] = CRGB(195, 195, 10);
   }
 
   // top 1/3: red (tip)
-  for (int i = num_green; i < num_leds; i++) {
-    _leds[i] = CRGB(255, 20, 0);
+  for (int i = num_green; i < strip.num_leds; i++) {
+    strip.leds[i] = CRGB(255, 20, 0);
   }
 }
 
-/* adjusts branch according to ratio */
-void regionFires(CRGB* led_strip, int num_leds, int red_percent = 30){ 
+/* display region fires - static version */
+void regionFiresStatic(Strip& strip) {
+  int num_green = strip.num_leds * (100 - strip.red_percent) / 100;
   
-  int num_green = num_leds * (100 - red_percent) / 100;  
-
-  // out of bounds check
-  if (num_green > num_leds || num_green < 0) {
-    Serial.print("ERROR: num_green out of bounds! ");
-    Serial.println(num_green);
+  if (num_green < 0 || num_green > strip.num_leds) {
+    Serial.print("ERROR: num_green out of bounds for ");
+    Serial.println(strip.name);
     return;
   }
 
   for (int i = 0; i < num_green; i++) {
-    led_strip[i] = colour_healthy;  
+    strip.leds[i] = colour_healthy;
   }
-
-  for (int i = num_green; i < num_leds; i++) {
-    led_strip[i] = colour_fire;  
+  for (int i = num_green; i < strip.num_leds; i++) {
+    strip.leds[i] = colour_fire;
   }
 }
 
+/* display region fires - using actual satellite data! (definitely) */
+void regionFiresDynamic(Strip& strip) {
+  unsigned long now = millis();
+  
+  // periodically retrieve satellite data
+  if (now - strip.last_effect_update >= strip.satellite_interval_ms) {
+    strip.last_effect_update = now;
+    strip.red_percent = totallyLegitSatelliteData(strip);
+  }
+  
+  // render using static update version
+  regionFiresStatic(strip);
+}
 
-//MARK: helper
+
+//MARK: helpers
+
 /* helper: print strip status */
 void printStripStatus() {
   int total_leds = 0;
@@ -290,7 +323,29 @@ void printStripStatus() {
   Serial.println("==================\n");
 }
 
-//MARK: 📡 🛰️
+// some nice functions to change display modes during runtime!
+// either add some buttons or whatever, or via serial
+
+/* change strip's display mode/function */
+void setDisplayMode(int index, void (*newMode)(Strip&)) {
+  if (index >= 0 && index < NUM_STRIPS) {
+    strips[index].displayMode = newMode;
+    Serial.print("Updated ");
+    Serial.println(strips[index].name);
+  }
+}
+
+/* Set all strips to same mode */
+void setAllDisplayModes(void (*newMode)(Strip&)) {
+  for (int i = 0; i < NUM_STRIPS; i++) {
+    strips[i].displayMode = newMode;
+  }
+  Serial.println("All strip display functions updated");
+}
+
+// =====================================================================
+
+//MARK: SECRET
 
 /*
 * TOP SECRET satellite data function
@@ -298,7 +353,7 @@ void printStripStatus() {
 * pass in region-led-strip 
 * returns percentage of fire
 */
-int totallyLegitSatelliteData(StripConfig& strip) {
+int totallyLegitSatelliteData(Strip& strip) {
   
   int current_red_percent = strip.red_percent;
   int change = random(-20, 21);  // magic!
