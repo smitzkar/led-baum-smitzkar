@@ -3,7 +3,6 @@
 // - no reliable WiFi! -> no mqtt, no Raspberry Pi, no near-realtime updates
 // 
 // -[] adjust FastLED.setMaxPowerInVoltsAndMilliamps(5,1000); in setup
-// -[] completely replace delay() ? 
 // -[] figure out europe strip
 //
 
@@ -68,9 +67,7 @@ struct Strip {
   int milliamps;      // max mA as secondary safety measure
   CRGB* leds;         // points to the actual LED array
   int red_percent;    // state for basic fire effects
-  // a bit advanced: 
-  // creates pointer to a function
-  // function has to be of form: `void <functionName>(Strip& <stripName>);`
+  // a bit advanced: creates pointer to a function
   void (*displayMode)(Strip&); 
   unsigned long last_effect_update; // state for timing
   int effect_delay;  // state for timing
@@ -83,7 +80,7 @@ CRGB leds_asia[ASIA_NUM];
 CRGB leds_africa[AFRI_NUM];
 CRGB leds_australia[AUST_NUM];
 
-// forward declarations (all valid displayMode functions -> can be assigned to strip)
+// forward declarations (all valid displayMode functions -> can be directly assigned to strip)
 void sarasLights(Strip& strip);
 void regionFiresStatic(Strip& strip);
 void regionFiresDynamic(Strip& strip);
@@ -91,12 +88,39 @@ void flickeringFire(Strip& strip);
 void fancyGradient(Strip& strip);
 void allLEDsOff(Strip& strip);  
 
+// example of display function which can be assigned to strips using wrappers 
+// free to use whatever function interface you want! (though you probably want to include the strip)
+void pulse(Strip& strip, uint16_t period_ms, CRGB color) {
+  uint8_t brightness = beatsin8(60000 / period_ms, 0, 255);
+  fill_solid(strip.leds, strip.num_leds, color);
+  fadeToBlackBy(strip.leds, strip.num_leds, 255 - brightness);
+}
+
+// custom wrappers for each strip -> forward on to some other function
+// basically a little trick to work around cpp limitation and allow assignment of functions that don't fit the required form inside the struct
+// -> write your own function, then call it inside the region's wrappers you want it to work on, with whatever arguments you like
+void europeDisplay(Strip& strip) {
+  pulse(strip, 3000, CRGB::Orange);  // 3 second orange pulse
+}
+
+void asiaDisplay(Strip& strip) {
+  regionFiresDynamic(strip);  
+}
+
+void africaDisplay(Strip& strip) {
+  flickeringFire(strip);
+}
+
+void australiaDisplay(Strip& strip) {
+  sarasLights(strip); 
+}
+
 // instantiate strips in array for easy iterating over later
 Strip strips[] = {
-  {"Europe",    EURO_NUM,  800, leds_europe,    15, regionFiresDynamic, 0, 0,  5000}, 
-  {"Asia",      ASIA_NUM, 1000, leds_asia,      30, regionFiresDynamic, 0, 0, 10000},
-  {"Africa",    AFRI_NUM, 1200, leds_africa,    40, regionFiresStatic,  0, 0, 10000},
-  {"Australia", AUST_NUM,  500, leds_australia, 23, sarasLights,        0, 0, 10000},
+  {"Europe",    EURO_NUM,  800, leds_europe,    15, europeDisplay, 0, 0, 5000}, 
+  {"Asia",      ASIA_NUM, 1000, leds_asia,      30, asiaDisplay, 0, 0, 10000},
+  {"Africa",    AFRI_NUM, 1200, leds_africa,    40, africaDisplay, 0, 0, 10000},
+  {"Australia", AUST_NUM,  500, leds_australia, 23, australiaDisplay, 0, 0, 10000},
 };
 // auto-calculate number of strips 
 // very easy to add or remove strips, then forget to manually change this
@@ -117,7 +141,6 @@ void setup() {
 
   // init FastLED for each strip explicitly 
   // MUST be done by hand, hardcoding in pin and colour order
-  
   pinMode(EURO_PIN, OUTPUT);
   FastLED.addLeds<WS2812B, EURO_PIN, EURO_ORDER>(strips[0].leds, strips[0].num_leds)
         .setCorrection(TypicalLEDStrip);
