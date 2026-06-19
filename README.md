@@ -3,8 +3,9 @@
 ## IMPORTANT!!!  
 in my vscode workspace, the platformio project's files are NOT linked to project git repo!  
 
--> work in platformio project
--> when done/made process, sync  
+-> write code in repo
+-> copy into platformio project to test
+-> when done/made process, ensure sync > git push  
 
 (got too annoyed to actually get it working)
 

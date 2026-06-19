@@ -6,7 +6,7 @@
 // -[x] figure out europe strip
 //
 
-// 4 branches with varying number of LEDs
+// 4 branches with varying number of LEDs (using original exhibition names - continents)
 // Europe     17
 // Asia       20
 // Africa     24
@@ -20,9 +20,12 @@
 // - plonk main.cpp back into <sketchname>.ino file
 // - if relevant: add any .h and .cpp files to sketch folder (where <sketchname.ino> lives)
 // - deal with any missing libraries via library manager
+
+// required for platformio
 #include <Arduino.h> 
 
 #include <FastLED.h>
+
 // very simplified "how does this work?"
 // (check README for links to documentation)
 // - a bunch of set up stuff -> just look at how it's done below or check out example in documentation
@@ -39,7 +42,8 @@
 //     - removes them from the package, 
 //     - and sends the rest to the next one
 // - the next led does the same, until there's either no more package remaining or no more led to read it
-// so... if we want to only change the n-th led, we still have to resend the data for all the previous ones!      
+// so... if we want to only change the n-th led, we still have to resend the data for all the previous ones! 
+// (technically, we don't have to include the >=n+1-th, and could save some time, but it really isn't worth the effort)     
 
 
 #define MAX_BRIGHTNESS 200  // 0-255, best to keep this somwhat below max (keeps controllers from overheating)
@@ -51,32 +55,33 @@
 #define AFRI_PIN   25
 #define AUST_PIN   33
 #define TEST_PIN   32
-// colour order definitions (same deal)
+// colour order definitions (there used to be different led strips, before I ensured that all are using the same order, but might as well keep it)
 #define EURO_ORDER GRB
 #define ASIA_ORDER GRB
 #define AFRI_ORDER GRB
 #define AUST_ORDER GRB
 #define TEST_ORDER GRB
 
-
-// uncomment ONE of these to select configuration
+//MARK: SETTING: tiny or full
+// tiny tree = for testing, full tree = the real deal
+// uncomment ONE of these to select configuration: error if none, if none commented out it defaults to full tree
 // (using conditional compilation / preprocessor conditionals -> the other simply aren't compiled at all):
 #define TINY_TREE
 // #define FULL_TREE
 
 // number of leds
-#ifdef TINY_TREE
-  #define EURO_NUM   5
-  #define ASIA_NUM   5
-  #define AFRI_NUM   5
-  #define AUST_NUM   5
-  #define TEST_NUM   5
-#elif defined(FULL_TREE)
+#ifdef FULL_TREE
   #define EURO_NUM   17
   #define ASIA_NUM   20
   #define AFRI_NUM   24
   #define AUST_NUM   38
   #define TEST_NUM    8
+#elif defined(TINY_TREE)
+  #define EURO_NUM    5
+  #define ASIA_NUM    5
+  #define AFRI_NUM    5
+  #define AUST_NUM    5
+  #define TEST_NUM    5
 #else
   #error "Please define either TINY_TREE or FULL_TREE"
 #endif
@@ -104,8 +109,8 @@ CRGB leds_australia[AUST_NUM];
 CRGB leds_test[TEST_NUM];
 
 //MARK: forward declarations
-// arduino doesn't care, cpp does! (relevant when using platformio)
-// forward declarations (all valid displayMode functions -> can be directly assigned to strip)
+// arduino doesn't care, C/C++ does! (relevant when using platformio)
+// (all valid displayMode functions -> can be directly assigned to strip)
 void sarasLights(Strip& strip);
 void regionFiresStatic(Strip& strip);
 void regionFiresDynamic(Strip& strip);
@@ -116,8 +121,27 @@ void allLEDsOff(Strip& strip);
 void printStripStatus();
 int totallyLegitSatelliteData(Strip& strip);
 
-// example of display function which can be assigned to strips using wrappers 
-// free to use whatever function interface you want! (though you probably want to include the strip)
+//MARK: display function wrappers
+// What? 
+// To include/assign functions to the `Strip` struct, this function template must either include all potentially useful arguments,
+// or more reasonably, have a very simple one. I went with the latter. Just a set name and the strip: see europeDisplay for example
+// To then actually write fancy and overly complicated animations and however many arguments you might want to include, 
+// you simply call that function inside the strip's display wrapper function:
+// `void testDisplay(Strip& strip){ <yourFancyFunction>(); }`
+
+
+// follow the following function interface:
+// - MUST be of type void (no return value)
+// - MUST include strip (see `Strip strips[]` array)
+// - CAN include some time and/or color value (to be used in whatever actual function this wraps around)
+// Because this would severely limit the kinds of effects one might create (or make it super annoying to do so), 
+// this is just a wrapper (~ a function which calls another function). 
+// Just create a new one, give it a name, call whatever functionality or functions inside of it. 
+// The inner functions can then use whatever function interface / arguments you want (though you probably want to include the strip)
+
+/* simple example of a display function, which can be assigned to strips  
+* - 
+*/
 void pulse(Strip& strip, uint16_t period_ms, CRGB color) {
   uint8_t brightness = beatsin8(60000 / period_ms, 0, 255);
   fill_solid(strip.leds, strip.num_leds, color);
