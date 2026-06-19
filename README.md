@@ -1,13 +1,13 @@
 # Tree for dEIn Labor https://www.tu.berlin/dein-labor
 
-## IMPORTANT!!!  
-in my vscode workspace, the platformio project's files are NOT linked to project git repo!  
+## IMPORTANT!!!
+This repo now contains both variants:
 
--> write code in repo
--> copy into platformio project to test
--> when done/made process, ensure sync > git push  
+- `src/esp32_ledTree_Karl.ino` for Arduino IDE users (simply open this via Arduino IDE (let it create a sketch folder)).
+- `src/usingPlatformIO/main.cpp` for PlatformIO (advanced users).
 
-(got too annoyed to actually get it working)
+The repo root also has `platformio.ini`, so PlatformIO builds directly from the repo via `src/usingPlatformIO`.
+
 
 ## some notes
 
