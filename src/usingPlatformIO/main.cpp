@@ -86,7 +86,7 @@
   #error "Please define either TINY_TREE or FULL_TREE"
 #endif
 
-
+//MARK: struct Strip
 // custom led strip object / data type
 struct Strip {
   const char* name;   // 
@@ -94,11 +94,10 @@ struct Strip {
   int milliamps;      // max mA as secondary safety measure
   CRGB* leds;         // points to the actual LED array
   int red_percent;    // state for basic fire effects
-  // a bit advanced: creates pointer to a function
-  void (*displayMode)(Strip&); 
-  unsigned long last_effect_update; // state for timing
-  int effect_delay;  // state for timing
-  unsigned long satellite_interval_ms; 
+  void (*displayMode)(Strip&); // a bit advanced: creates pointer to a function (see display wrapper functions)
+  unsigned long last_effect_update;     // state for timing
+  int effect_delay;                     // state for timing
+  unsigned long satellite_interval_ms;  // state for timing
 };
 
 // arrays of CRGB elements (red, green, blue), each 0-255
@@ -127,21 +126,9 @@ int totallyLegitSatelliteData(Strip& strip);
 // or more reasonably, have a very simple one. I went with the latter. Just a set name and the strip: see europeDisplay for example
 // To then actually write fancy and overly complicated animations and however many arguments you might want to include, 
 // you simply call that function inside the strip's display wrapper function:
-// `void testDisplay(Strip& strip){ <yourFancyFunction>(); }`
+// `void testDisplay(Strip& strip){ <yourFancyFunction>(Strip& strip, <optionallyMoreArgs>); }`
 
-
-// follow the following function interface:
-// - MUST be of type void (no return value)
-// - MUST include strip (see `Strip strips[]` array)
-// - CAN include some time and/or color value (to be used in whatever actual function this wraps around)
-// Because this would severely limit the kinds of effects one might create (or make it super annoying to do so), 
-// this is just a wrapper (~ a function which calls another function). 
-// Just create a new one, give it a name, call whatever functionality or functions inside of it. 
-// The inner functions can then use whatever function interface / arguments you want (though you probably want to include the strip)
-
-/* simple example of a display function, which can be assigned to strips  
-* - 
-*/
+/* simple example of a display function, which can be assigned to strips */
 void pulse(Strip& strip, uint16_t period_ms, CRGB color) {
   uint8_t brightness = beatsin8(60000 / period_ms, 0, 255);
   fill_solid(strip.leds, strip.num_leds, color);
@@ -173,11 +160,11 @@ void testDisplay(Strip& strip) {
 
 // instantiate strips in array for easy iterating over later
 Strip strips[] = {
-  {"Europe",    EURO_NUM,  800, leds_europe,    15, europeDisplay, 0, 0, 5*MINS}, 
-  {"Asia",      ASIA_NUM, 1000, leds_asia,      30, asiaDisplay, 0, 0, 1*MINS},
-  {"Africa",    AFRI_NUM, 1200, leds_africa,    40, africaDisplay, 0, 0, 5*MINS},
+  {"Europe",    EURO_NUM,  800, leds_europe,    15, europeDisplay,    0, 0, 5*MINS}, 
+  {"Asia",      ASIA_NUM, 1000, leds_asia,      30, asiaDisplay,      0, 0, 1*MINS},
+  {"Africa",    AFRI_NUM, 1200, leds_africa,    40, africaDisplay,    0, 0, 5*MINS},
   {"Australia", AUST_NUM,  500, leds_australia, 23, australiaDisplay, 0, 0, 5*MINS},
-  {"Test",      TEST_NUM,  200, leds_test,      20, testDisplay, 0, 0, 2000},
+  {"Test",      TEST_NUM,  200, leds_test,      20, testDisplay,      0, 0, 2000},
 };
 // auto-calculate number of strips 
 // very easy to add or remove strips, then forget to manually change this
@@ -188,6 +175,9 @@ const int NUM_STRIPS = sizeof(strips) / sizeof(strips[0]);
 // some example colours used in fires display
 CRGB colour_healthy = CRGB(195, 195, 10);
 CRGB colour_fire = CRGB(255, 20, 0);
+
+
+/*===================================================================================================================*/
 
 //MARK: setup
 void setup() {
@@ -233,7 +223,7 @@ void setup() {
   Serial.println("Setup complete, running loop.");
 }
 
-
+/*===================================================================================================================*/
 
 //MARK: loop
 void loop() {
@@ -256,34 +246,10 @@ void loop() {
   }
 }
 
-//MARK: LED functions
 
-/* run colour test on all strips (check if red = red, etc.) */
-void testColors() {
-  Serial.println("Testing RED...");
-  for (int i = 0; i < NUM_STRIPS; i++) {
-    strips[i].leds[0] = CRGB(255, 0, 0);
-  }
-  FastLED.show();
-  delay(2000);
-  
-  Serial.println("Testing GREEN...");
-  for (int i = 0; i < NUM_STRIPS; i++) {
-    strips[i].leds[0] = CRGB(0, 255, 0);
-  }
-  FastLED.show();
-  delay(2000);
-  
-  Serial.println("Testing BLUE...");
-  for (int i = 0; i < NUM_STRIPS; i++) {
-    strips[i].leds[0] = CRGB(0, 0, 255);
-  }
-  FastLED.show();
-  delay(2000);
-  
-  FastLED.clear();
-  FastLED.show();
-}
+/*===================================================================================================================*/
+
+//MARK: LED functions
 
 /* turn strip off */
 void allLEDsOff(Strip& strip) {
@@ -409,8 +375,35 @@ void printStripStatus() {
   Serial.println("==================\n");
 }
 
+/* run colour test on all strips (check if red = red, etc.) */
+void testColors() {
+  Serial.println("Testing RED...");
+  for (int i = 0; i < NUM_STRIPS; i++) {
+    strips[i].leds[0] = CRGB(255, 0, 0);
+  }
+  FastLED.show();
+  delay(2000);
+  
+  Serial.println("Testing GREEN...");
+  for (int i = 0; i < NUM_STRIPS; i++) {
+    strips[i].leds[0] = CRGB(0, 255, 0);
+  }
+  FastLED.show();
+  delay(2000);
+  
+  Serial.println("Testing BLUE...");
+  for (int i = 0; i < NUM_STRIPS; i++) {
+    strips[i].leds[0] = CRGB(0, 0, 255);
+  }
+  FastLED.show();
+  delay(2000);
+  
+  FastLED.clear();
+  FastLED.show();
+}
+
 // some nice functions to change display modes during runtime!
-// either add some buttons or whatever, or via serial
+// either add some buttons or sensors or whatever to activate them, or do it manually via serial
 
 /* change strip's display mode/function */
 void setDisplayMode(int index, void (*newMode)(Strip&)) {
@@ -429,15 +422,16 @@ void setAllDisplayModes(void (*newMode)(Strip&)) {
   Serial.println("All strip display functions updated");
 }
 
-// =====================================================================
+/*===================================================================================================================*/
 
-//MARK: SECRET
+//MARK: ⛔ CLASSIFIED ⛔
 
 /*
 * ⋆⭒˚.⋆ 🌍 🛰️ ⋆⭒˚.⋆ TOP SECRET satellite data function ⋆⭒˚.⋆ 🪐🛸⋆⭒˚.⋆
-* Somehow works without wlan! Some proper NASA-level engineering 👩🏻‍🔬
-* - pass in region-led-strip 
-* - returns percentage of fire [0-100]
+*
+* Somehow works without WLAN! Some proper NASA-level engineering 👩🏻‍🔬
+*
+* - returns percentage of fire [0-100] for a given continent
 */
 int totallyLegitSatelliteData(Strip& strip) {
   
