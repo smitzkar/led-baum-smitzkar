@@ -117,7 +117,12 @@ void flickeringFire(Strip& strip);
 void fancyGradient(Strip& strip);
 void allLEDsOff(Strip& strip);  
 
+// some convenient helpers
 void printStripStatus();
+void testColors();
+void setDisplayMode(int index, void (*newMode)(Strip&));
+void setAllDisplayModes(void (*newMode)(Strip&));
+void setDisplayModeByName(const char* stripName, void (*newMode)(Strip&));
 int totallyLegitSatelliteData(Strip& strip);
 
 //MARK: display function wrappers
@@ -251,6 +256,10 @@ void loop() {
 
 //MARK: LED functions
 
+// Your very own function could live here!
+
+// some basic examples:
+
 /* turn strip off */
 void allLEDsOff(Strip& strip) {
   for (int i = 0; i < strip.num_leds; i++) {
@@ -333,14 +342,14 @@ void regionFiresStatic(Strip& strip) {
   }
 }
 
-/* display region fires - using actual satellite data! (definitely) */
+/* display region fires - using actual satellite data! (definitely real) */
 void regionFiresDynamic(Strip& strip) {
   unsigned long now = millis();
   
   // periodically retrieve satellite data
   if (now - strip.last_effect_update >= strip.satellite_interval_ms) {
     strip.last_effect_update = now;
-    strip.red_percent = totallyLegitSatelliteData(strip);
+    strip.red_percent = totallyLegitSatelliteData(strip); // query the satellites 
   }
   
   // render using static update version
@@ -375,7 +384,7 @@ void printStripStatus() {
   Serial.println("==================\n");
 }
 
-/* run colour test on all strips (check if red = red, etc.) */
+/* run colour test on all strips (check if colour order is correct) */
 void testColors() {
   Serial.println("Testing RED...");
   for (int i = 0; i < NUM_STRIPS; i++) {
@@ -405,22 +414,47 @@ void testColors() {
 // some nice functions to change display modes during runtime!
 // either add some buttons or sensors or whatever to activate them, or do it manually via serial
 
-/* change strip's display mode/function */
+/* Change strip's assigned display mode / display function 
+*
+* example usage: `setDisplayMode(0, sarasLights);`  
+* Note the lack of `()` after sarasLights! we are passing a pointer to the function (to then replace 
+* the existing one in Strip object), not calling it. 
+* For this to work, the function must either be a simple one of form: `void name(Strip& strip)`, 
+* or wrapped inside display wrapper.  
+* It uses index over strip names, for robustness and more straightforward runtime execution. 
+*/
 void setDisplayMode(int index, void (*newMode)(Strip&)) {
   if (index >= 0 && index < NUM_STRIPS) {
     strips[index].displayMode = newMode;
     Serial.print("Updated ");
     Serial.println(strips[index].name);
+  }else{
+    Serial.print("Error: There are only ");
+    Serial.print(NUM_STRIPS);
+    Serial.println(" led strips :)");
   }
 }
 
-/* Set all strips to same mode */
+/* change strip's assigned display mode / display function by name (instead of index) */
+void setDisplayModeByName(const char* stripName, void (*newMode)(Strip&)) {
+  for (int i = 0; i < NUM_STRIPS; i++) {
+    if (strcmp(strips[i].name, stripName) == 0) {
+      setDisplayMode(i, newMode);
+      return;
+    }
+  }
+  Serial.print("Strip not found: ");
+  Serial.println(stripName);
+}
+
+/* set all strips to same mode */
 void setAllDisplayModes(void (*newMode)(Strip&)) {
   for (int i = 0; i < NUM_STRIPS; i++) {
     strips[i].displayMode = newMode;
   }
   Serial.println("All strip display functions updated");
 }
+
 
 /*===================================================================================================================*/
 
