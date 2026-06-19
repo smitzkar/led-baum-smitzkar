@@ -1,5 +1,15 @@
 # Tree for dEIn Labor https://www.tu.berlin/dein-labor
 
+## IMPORTANT!!!  
+in my vscode workspace, the platformio project's files are NOT linked to project git repo!  
+
+-> work in platformio project
+-> when done/made process, sync  
+
+(got too annoyed to actually get it working)
+
+## some notes
+
 // https://github.com/FastLED/FastLED/wiki/
 // https://github.com/FastLED/FastLED/wiki/Power-notes
 // >Some of these are just good engineering. Some are just plain voodoo. Use whichever ones that work for you.

@@ -3,21 +3,22 @@
 // - no reliable WiFi! -> no mqtt, no Raspberry Pi, no near-realtime updates
 // 
 // -[] adjust FastLED.setMaxPowerInVoltsAndMilliamps(5,1000); in setup
-// -[] figure out europe strip
+// -[x] figure out europe strip
 //
 
 // 4 branches with varying number of LEDs
-// Europe     16  (! uses different led controller !)
+// Europe     17
 // Asia       20
 // Africa     24
 // Australia  38
 
-// 03-16 platformio (to speed up compiling and get a proper IDE) 
+// 2026-03-16 platformio (to speed up compiling and get a proper IDE) 
 // requirements to make it work:
 // - <sketch-name>.ino replaced with main.cpp
 // - #include <Arduino.h> added at the top 
 // to use the same code via arduino ide:
-// - plonk main.cpp back into .ino file
+// - plonk main.cpp back into <sketchname>.ino file
+// - if relevant: add any .h and .cpp files to sketch folder (where <sketchname.ino> lives)
 // - deal with any missing libraries via library manager
 #include <Arduino.h> 
 
@@ -49,16 +50,37 @@
 #define ASIA_PIN   26
 #define AFRI_PIN   25
 #define AUST_PIN   33
+#define TEST_PIN   32
 // colour order definitions (same deal)
-#define EURO_ORDER BRG
+#define EURO_ORDER GRB
 #define ASIA_ORDER GRB
 #define AFRI_ORDER GRB
 #define AUST_ORDER GRB
+#define TEST_ORDER GRB
+
+
+// uncomment ONE of these to select configuration
+// (using conditional compilation / preprocessor conditionals -> the other simply aren't compiled at all):
+#define TINY_TREE
+// #define FULL_TREE
+
 // number of leds
-#define EURO_NUM   16
-#define ASIA_NUM   20
-#define AFRI_NUM   24
-#define AUST_NUM   38
+#ifdef TINY_TREE
+  #define EURO_NUM   5
+  #define ASIA_NUM   5
+  #define AFRI_NUM   5
+  #define AUST_NUM   5
+  #define TEST_NUM   5
+#elif defined(FULL_TREE)
+  #define EURO_NUM   17
+  #define ASIA_NUM   20
+  #define AFRI_NUM   24
+  #define AUST_NUM   38
+  #define TEST_NUM    8
+#else
+  #error "Please define either TINY_TREE or FULL_TREE"
+#endif
+
 
 // custom led strip object / data type
 struct Strip {
@@ -79,7 +101,10 @@ CRGB leds_europe[EURO_NUM];
 CRGB leds_asia[ASIA_NUM];
 CRGB leds_africa[AFRI_NUM];
 CRGB leds_australia[AUST_NUM];
+CRGB leds_test[TEST_NUM];
 
+//MARK: forward declarations
+// arduino doesn't care, cpp does! (relevant when using platformio)
 // forward declarations (all valid displayMode functions -> can be directly assigned to strip)
 void sarasLights(Strip& strip);
 void regionFiresStatic(Strip& strip);
@@ -87,6 +112,9 @@ void regionFiresDynamic(Strip& strip);
 void flickeringFire(Strip& strip);
 void fancyGradient(Strip& strip);
 void allLEDsOff(Strip& strip);  
+
+void printStripStatus();
+int totallyLegitSatelliteData(Strip& strip);
 
 // example of display function which can be assigned to strips using wrappers 
 // free to use whatever function interface you want! (though you probably want to include the strip)
@@ -108,19 +136,24 @@ void asiaDisplay(Strip& strip) {
 }
 
 void africaDisplay(Strip& strip) {
-  flickeringFire(strip);
+  fancyGradient(strip);
 }
 
 void australiaDisplay(Strip& strip) {
   sarasLights(strip); 
 }
 
+void testDisplay(Strip& strip) {
+  regionFiresDynamic(strip);
+}
+
 // instantiate strips in array for easy iterating over later
 Strip strips[] = {
-  {"Europe",    EURO_NUM,  800, leds_europe,    15, europeDisplay, 0, 0, 5000}, 
-  {"Asia",      ASIA_NUM, 1000, leds_asia,      30, asiaDisplay, 0, 0, 10000},
-  {"Africa",    AFRI_NUM, 1200, leds_africa,    40, africaDisplay, 0, 0, 10000},
-  {"Australia", AUST_NUM,  500, leds_australia, 23, australiaDisplay, 0, 0, 10000},
+  {"Europe",    EURO_NUM,  800, leds_europe,    15, europeDisplay, 0, 0, 5*MINS}, 
+  {"Asia",      ASIA_NUM, 1000, leds_asia,      30, asiaDisplay, 0, 0, 1*MINS},
+  {"Africa",    AFRI_NUM, 1200, leds_africa,    40, africaDisplay, 0, 0, 5*MINS},
+  {"Australia", AUST_NUM,  500, leds_australia, 23, australiaDisplay, 0, 0, 5*MINS},
+  {"Test",      TEST_NUM,  200, leds_test,      20, testDisplay, 0, 0, 2000},
 };
 // auto-calculate number of strips 
 // very easy to add or remove strips, then forget to manually change this
@@ -140,7 +173,7 @@ void setup() {
   Serial.println("=== Multi-Strip LED Controller ===");
 
   // init FastLED for each strip explicitly 
-  // MUST be done by hand, hardcoding in pin and colour order
+  // MUST be done like this (annoyingly, this can't easily be done via loop), hardcoding in pin and colour order
   pinMode(EURO_PIN, OUTPUT);
   FastLED.addLeds<WS2812B, EURO_PIN, EURO_ORDER>(strips[0].leds, strips[0].num_leds)
         .setCorrection(TypicalLEDStrip);
@@ -160,6 +193,11 @@ void setup() {
   FastLED.addLeds<WS2812B, AUST_PIN, AUST_ORDER>(strips[3].leds, strips[3].num_leds)
         .setCorrection(TypicalLEDStrip);
   FastLED.setMaxPowerInVoltsAndMilliamps(5, strips[3].milliamps);
+
+  pinMode(TEST_PIN, OUTPUT);
+  FastLED.addLeds<WS2812B, TEST_PIN, TEST_ORDER>(strips[4].leds, strips[4].num_leds)
+        .setCorrection(TypicalLEDStrip);
+  FastLED.setMaxPowerInVoltsAndMilliamps(5, strips[4].milliamps);
   
   // set brightness scaling for all strips, clear all leds
   FastLED.setBrightness(MAX_BRIGHTNESS);
@@ -168,7 +206,7 @@ void setup() {
 
   // all done! 
   printStripStatus();
-  Serial.println("Setup complete, starting loop.");
+  Serial.println("Setup complete, running loop.");
 }
 
 
@@ -239,9 +277,10 @@ void singleColour(Strip& strip, CRGB color) {
 
 /* basic gradient effect example */
 void fancyGradient(Strip& strip) {
+  int scalar = 12;
   for (int i = 0; i < strip.num_leds; i++) {
     if (i <= strip.num_leds / 2) {
-      strip.leds[i] = CRGB(3*i, 200-4*i, 0);
+      strip.leds[i] = CRGB(scalar*i, 160 - scalar*i, 0);
     } else {
       strip.leds[i] = CRGB(255, 64, 0);
     }
@@ -371,10 +410,10 @@ void setAllDisplayModes(void (*newMode)(Strip&)) {
 //MARK: SECRET
 
 /*
-* TOP SECRET satellite data function
-* somehow works without wlan! some proper NASA-level engineering
-* pass in region-led-strip 
-* returns percentage of fire
+* ⋆⭒˚.⋆ 🌍 🛰️ ⋆⭒˚.⋆ TOP SECRET satellite data function ⋆⭒˚.⋆ 🪐🛸⋆⭒˚.⋆
+* Somehow works without wlan! Some proper NASA-level engineering 👩🏻‍🔬
+* - pass in region-led-strip 
+* - returns percentage of fire [0-100]
 */
 int totallyLegitSatelliteData(Strip& strip) {
   
@@ -382,10 +421,10 @@ int totallyLegitSatelliteData(Strip& strip) {
   int change = random(-20, 21);  // magic!
   int new_red_percent = current_red_percent + change;
    
-  // add some "gravity" to prevent extremes
-  if (new_red_percent > 80) {
-    new_red_percent -= random(0, 10);  // pull downward
-  } else if (new_red_percent < 20) {
+  // add some "gravity" to keep it roughly in reasonable range
+  if (new_red_percent > 60) {
+    new_red_percent -= random(3, 12);  // pull downward
+  } else if (new_red_percent < 10) {
     new_red_percent += random(0, 10);  // pull upward
   }
   
