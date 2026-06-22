@@ -46,8 +46,20 @@
 // (technically, we don't have to include the >=n+1-th, and could save some time, but it really isn't worth the effort)     
 
 
-#define MAX_BRIGHTNESS 200  // 0-255, best to keep this somwhat below max (keeps controllers from overheating)
-#define MINS 60000 // little helper
+// little helper
+#define MINS 60000
+
+//MARK: GLOBAL SETTINGS
+// Keep the key runtime knobs in one place so they are easy to find and adjust.
+#define MAX_BRIGHTNESS 200  // 0-255, best to keep this somewhat below max
+#define MILLIAMPS_PER_LED 40  // rough safety budget per LED
+#define DEFAULT_DISPLAY_UPDATE_INTERVAL_MS 50  // 20 FPS
+
+// to allow it to be adjusted
+unsigned long display_update_interval_ms = DEFAULT_DISPLAY_UPDATE_INTERVAL_MS; 
+
+#define SATELLITE_INTERVAL_MS (5 * MINS)
+#define TEST_SATELLITE_INTERVAL_MS   2000
 
 // pin definitions (only way to NOT have to hardcode them inside setup)
 #define EURO_PIN   27
@@ -90,11 +102,11 @@
 // custom led strip object / data type
 struct Strip {
   const char* name;   // 
+  CRGB* leds;         // points to the actual LED array
   int num_leds;       // number of leds in strip
   int milliamps;      // max mA as secondary safety measure
-  CRGB* leds;         // points to the actual LED array
-  int red_percent;    // state for basic fire effects
   void (*displayMode)(Strip&); // a bit advanced: creates pointer to a function (see display wrapper functions)
+  int red_percent;    // state for basic fire effects
   unsigned long last_effect_update;     // state for timing
   int effect_delay;                     // state for timing
   unsigned long satellite_interval_ms;  // state for timing
@@ -123,6 +135,16 @@ void testColors();
 void setDisplayMode(int index, void (*newMode)(Strip&));
 void setAllDisplayModes(void (*newMode)(Strip&));
 void setDisplayModeByName(const char* stripName, void (*newMode)(Strip&));
+void setDisplayUpdateInterval(unsigned long interval_ms);
+int calculateStripMilliamps(int num_leds);
+Strip makeStrip(
+  const char* name,
+  CRGB* leds,
+  int num_leds,
+  void (*displayMode)(Strip&),
+  int red_percent,
+  unsigned long satellite_interval_ms
+);
 int totallyLegitSatelliteData(Strip& strip);
 
 //MARK: display function wrappers
@@ -163,13 +185,24 @@ void testDisplay(Strip& strip) {
   regionFiresDynamic(strip);
 }
 
+Strip makeStrip(
+  const char* name,
+  CRGB* leds,
+  int num_leds,
+  void (*displayMode)(Strip&),
+  int red_percent,
+  unsigned long satellite_interval_ms
+) {
+  return {name, leds, num_leds, calculateStripMilliamps(num_leds), displayMode, red_percent, 0, 0, satellite_interval_ms};
+}
+
 // instantiate strips in array for easy iterating over later
 Strip strips[] = {
-  {"Europe",    EURO_NUM,  800, leds_europe,    15, europeDisplay,    0, 0, 5*MINS}, 
-  {"Asia",      ASIA_NUM, 1000, leds_asia,      30, asiaDisplay,      0, 0, 1*MINS},
-  {"Africa",    AFRI_NUM, 1200, leds_africa,    40, africaDisplay,    0, 0, 5*MINS},
-  {"Australia", AUST_NUM,  500, leds_australia, 23, australiaDisplay, 0, 0, 5*MINS},
-  {"Test",      TEST_NUM,  200, leds_test,      20, testDisplay,      0, 0, 2000},
+  makeStrip("Europe",     leds_europe,    EURO_NUM, europeDisplay, 15, SATELLITE_INTERVAL_MS),
+  makeStrip("Asia",       leds_asia,      ASIA_NUM, asiaDisplay, 30, SATELLITE_INTERVAL_MS),
+  makeStrip("Africa",     leds_africa,    AFRI_NUM, africaDisplay, 40, SATELLITE_INTERVAL_MS),
+  makeStrip("Australia",  leds_australia, AUST_NUM, australiaDisplay, 23, SATELLITE_INTERVAL_MS),
+  makeStrip("Test",       leds_test,      TEST_NUM, testDisplay, 20, TEST_SATELLITE_INTERVAL_MS),
 };
 // auto-calculate number of strips 
 // very easy to add or remove strips, then forget to manually change this
@@ -196,27 +229,22 @@ void setup() {
   pinMode(EURO_PIN, OUTPUT);
   FastLED.addLeds<WS2812B, EURO_PIN, EURO_ORDER>(strips[0].leds, strips[0].num_leds)
         .setCorrection(TypicalLEDStrip);
-  FastLED.setMaxPowerInVoltsAndMilliamps(5, strips[0].milliamps);
   
   pinMode(ASIA_PIN, OUTPUT);
   FastLED.addLeds<WS2812B, ASIA_PIN, ASIA_ORDER>(strips[1].leds, strips[1].num_leds)
         .setCorrection(TypicalLEDStrip);
-  FastLED.setMaxPowerInVoltsAndMilliamps(5, strips[1].milliamps);
   
   pinMode(AFRI_PIN, OUTPUT);
   FastLED.addLeds<WS2812B, AFRI_PIN, AFRI_ORDER>(strips[2].leds, strips[2].num_leds)
         .setCorrection(TypicalLEDStrip);
-  FastLED.setMaxPowerInVoltsAndMilliamps(5, strips[2].milliamps);
   
   pinMode(AUST_PIN, OUTPUT);
   FastLED.addLeds<WS2812B, AUST_PIN, AUST_ORDER>(strips[3].leds, strips[3].num_leds)
         .setCorrection(TypicalLEDStrip);
-  FastLED.setMaxPowerInVoltsAndMilliamps(5, strips[3].milliamps);
 
   pinMode(TEST_PIN, OUTPUT);
   FastLED.addLeds<WS2812B, TEST_PIN, TEST_ORDER>(strips[4].leds, strips[4].num_leds)
         .setCorrection(TypicalLEDStrip);
-  FastLED.setMaxPowerInVoltsAndMilliamps(5, strips[4].milliamps);
   
   // set brightness scaling for all strips, clear all leds
   FastLED.setBrightness(MAX_BRIGHTNESS);
@@ -232,14 +260,13 @@ void setup() {
 
 //MARK: loop
 void loop() {
-  // using static to avoid having to use global variable 
+  // using static to avoid having to use yet another global variable 
   // -> basically turns it into a variable that persists between function calls (or iterations in this case)
   // (really just to keep this all in one place)
   static unsigned long last_update = 0;
-  const int UPDATE_INTERVAL_MS = 50;  // 20 FPS
   unsigned long now_ms = millis();
 
-  if (now_ms - last_update >= UPDATE_INTERVAL_MS) {
+  if (now_ms - last_update >= display_update_interval_ms) {
     last_update = now_ms;
     
     // update and render strips according to their selected display mode
@@ -453,6 +480,14 @@ void setAllDisplayModes(void (*newMode)(Strip&)) {
     strips[i].displayMode = newMode;
   }
   Serial.println("All strip display functions updated");
+}
+
+int calculateStripMilliamps(int num_leds) {
+  return num_leds * MILLIAMPS_PER_LED;
+}
+
+void setDisplayUpdateInterval(unsigned long interval_ms) {
+  display_update_interval_ms = interval_ms;
 }
 
 
